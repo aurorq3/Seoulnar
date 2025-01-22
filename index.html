@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Seoulnarゲーム</title>
+  <meta name="description" content="Seoulnarのゲームです。">
+
+  <!-- 
+    ===== レスポンシブ対応 =====
+    画面幅に合わせて拡大・縮小できるように meta viewport を設定
+  -->
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+
+  <!-- 
+    @font-face でMinecraftフォントを読み込む (任意)
+    同フォルダに "minecraft.woff2" を用意 
+  -->
+  <style>
+    @font-face {
+      font-family: "Minecraft";
+      src: url("./minecraft.woff2") format("woff2");
+    }
+
+    body {
+      margin: 0;
+      background: #000;
+      font-family: "Minecraft", sans-serif;
+      color: #fff;
+    }
+
+    /* キャンバスを横幅いっぱいまで拡大し、アスペクト比を維持するため height:auto とする */
+    .container {
+      display: flex;
+      justify-content: center;
+      padding-top: 10px;
+    }
+    canvas {
+      /* 横幅100%以内に収まるようにしつつ比率維持 */
+      max-width: 100%;
+      height: auto;
+      border: 1px solid #333; /* 枠線(お好み) */
+      display: block;
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+  <!-- 
+    幅 = 8×CELL_SIZE = 8×80 = 640
+    高さ = 640 + 上部FPSバー30 = 670
+  -->
+  <canvas id="gameCanvas" width="640" height="670"></canvas>
+</div>
+
+<script>
+/*
+  === 仕様 ===
+  - 8×8マス (CHUNK_SIZE=8), セルサイズ80pxに拡大
+  - クリック最大9回
+    * 1~3回 => texture1
+    * 4~6回 => texture2
+    * 7~9回 => texture3
+  - 全マスが7以上になったら、まだ9に達してないマスに赤枠
+  - 全マスが9回になったら即リセット (全マスクリック回数=0に戻す)
+  - FPS(1秒ごと平均)を画面上部に表示
+  - レスポンシブ対応: CSSでcanvasを max-width: 100%; height: auto; とする
+*/
+
+// ------------------------
+// 基本設定
+// ------------------------
+const CHUNK_SIZE = 8;        // 8×8マス
+const CELL_SIZE = 80;        // 1マスのピクセルサイズ (大きく)
+const MAX_CLICKS = 9;
+const FPS_BAR_HEIGHT = 30;
+
+// Canvas実サイズ (論理ピクセル)
+const CANVAS_WIDTH = CHUNK_SIZE * CELL_SIZE;            // 640
+const CANVAS_HEIGHT = CHUNK_SIZE * CELL_SIZE + FPS_BAR_HEIGHT; // 670
+
+// ------------------------
+// 状態管理
+// ------------------------
+let clickCounts = [];  // 8×8の2次元配列
+let frameCount = 0;
+let timeAccumulator = 0; // ms
+let displayFPS = 0;      // 1秒ごとの平均FPS(整数)
+let clearCount = 0;      // クリア回数(お好みで表示してもいい)
+
+// ------------------------
+// 画像
+// ------------------------
+const texture1 = new Image();
+texture1.src = "./texture1.png";
+
+const texture2 = new Image();
+texture2.src = "./texture2.png";
+
+const texture3 = new Image();
+texture3.src = "./texture3.png";
+
+// ------------------------
+// 初期化
+// ------------------------
+function initGrid() {
+  clickCounts = [];
+  for (let r = 0; r < CHUNK_SIZE; r++) {
+    const rowArr = [];
+    for (let c = 0; c < CHUNK_SIZE; c++) {
+      rowArr.push(0);
+    }
+    clickCounts.push(rowArr);
+  }
+}
+
+// ------------------------
+// Canvas + イベント
+// ------------------------
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+canvas.addEventListener("mousedown", (e) => {
+  // 座標
+  const rect = canvas.getBoundingClientRect();
+  const mx = e.clientX - rect.left;
+  const my = e.clientY - rect.top;
+
+  // 上部FPSバーの30pxより下ならマスをクリック
+  if (my >= FPS_BAR_HEIGHT) {
+    const col = Math.floor(mx / CELL_SIZE);
+    const row = Math.floor((my - FPS_BAR_HEIGHT) / CELL_SIZE);
+    if (col >= 0 && col < CHUNK_SIZE && row >= 0 && row < CHUNK_SIZE) {
+      if (clickCounts[row][col] < MAX_CLICKS) {
+        clickCounts[row][col]++;
+      }
+    }
+  }
+});
+
+// ------------------------
+// ゲームループ
+// ------------------------
+let lastTime = performance.now();
+function gameLoop(now) {
+  const dt = now - lastTime; 
+  lastTime = now;
+
+  // FPS計測
+  frameCount++;
+  timeAccumulator += dt;
+  if (timeAccumulator >= 1000) {
+    displayFPS = Math.floor(frameCount / (timeAccumulator / 1000));
+    frameCount = 0;
+    timeAccumulator = 0;
+  }
+
+  update(dt);
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// ------------------------
+// 更新処理
+// ------------------------
+function update(dt) {
+  // 全マス9回かどうかチェック
+  let allNine = true;
+  for (let r = 0; r < CHUNK_SIZE; r++) {
+    for (let c = 0; c < CHUNK_SIZE; c++) {
+      if (clickCounts[r][c] < MAX_CLICKS) {
+        allNine = false;
+        break;
+      }
+    }
+    if (!allNine) break;
+  }
+
+  // 全マス9 => 即リセット
+  if (allNine) {
+    clearCount++;
+    initGrid();
+  }
+}
+
+// ------------------------
+// 描画
+// ------------------------
+function draw() {
+  // 背景
+  ctx.fillStyle = "black";
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT);
+
+  // === 上部UI ===
+  ctx.font = "20px Minecraft";
+  ctx.fillStyle = "white";
+
+  // FPS表示
+  ctx.fillText("FPS: " + displayFPS, 10, 22);
+
+  // (お好みで Clear回数を表示したい場合)
+  ctx.fillText("Clear: " + clearCount, 150, 22);
+
+  // === グリッドのテクスチャ描画 ===
+  for (let row = 0; row < CHUNK_SIZE; row++) {
+    for (let col = 0; col < CHUNK_SIZE; col++) {
+      const count = clickCounts[row][col];
+      const px = col * CELL_SIZE;
+      const py = row * CELL_SIZE + FPS_BAR_HEIGHT;
+
+      if (count >= 1 && count <= 3) {
+        ctx.drawImage(texture1, px, py, CELL_SIZE, CELL_SIZE);
+      } else if (count >= 4 && count <= 6) {
+        ctx.drawImage(texture2, px, py, CELL_SIZE, CELL_SIZE);
+      } else if (count >= 7 && count <= 9) {
+        ctx.drawImage(texture3, px, py, CELL_SIZE, CELL_SIZE);
+      }
+      // 0回は黒いまま(描画しない)
+    }
+  }
+
+  // === 全マスが7以上かどうか判定 => 9未満のマスに赤枠 ===
+  let allAtLeast7 = true;
+  for (let r = 0; r < CHUNK_SIZE; r++) {
+    for (let c = 0; c < CHUNK_SIZE; c++) {
+      if (clickCounts[r][c] < 7) {
+        allAtLeast7 = false;
+        break;
+      }
+    }
+    if (!allAtLeast7) break;
+  }
+  if (allAtLeast7) {
+    ctx.strokeStyle = "red";
+    ctx.lineWidth = 3;  // 枠をやや太く
+    for (let r = 0; r < CHUNK_SIZE; r++) {
+      for (let c = 0; c < CHUNK_SIZE; c++) {
+        if (clickCounts[r][c] < 9) {
+          const px = c * CELL_SIZE;
+          const py = r * CELL_SIZE + FPS_BAR_HEIGHT;
+          ctx.strokeRect(px, py, CELL_SIZE, CELL_SIZE);
+        }
+      }
+    }
+  }
+
+  // === 通常のグリッド線 (灰色) ===
+  ctx.strokeStyle = "gray";
+  ctx.lineWidth = 1;
+  for (let i = 0; i <= CHUNK_SIZE; i++) {
+    // 縦線
+    const x = i * CELL_SIZE;
+    ctx.beginPath();
+    ctx.moveTo(x, FPS_BAR_HEIGHT);
+    ctx.lineTo(x, CANVAS_HEIGHT);
+    ctx.stroke();
+
+    // 横線
+    const y = i * CELL_SIZE + FPS_BAR_HEIGHT;
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(CANVAS_WIDTH, y);
+    ctx.stroke();
+  }
+}
+
+// ------------------------
+// 実行
+// ------------------------
+initGrid();
+requestAnimationFrame(gameLoop);
+</script>
+
+</body>
+</html>
